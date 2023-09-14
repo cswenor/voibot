@@ -1,0 +1,16 @@
+{
+  "algod-api": {
+    "address": "http://192.168.1.210:18180",
+    "token": ".."
+  },
+  "gql-api": {
+    "address": "https://mainnet.all.algorpc.pro/.../gql/v0"
+  },
+  "pkeys": {
+    //..
+    "expiredpkey": "..."
+  },
+  "singletons": {
+    "": true
+  }
+} 

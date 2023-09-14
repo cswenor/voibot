@@ -1,0 +1,194 @@
+package worker
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/algonode/voibot/internal/config"
+	"github.com/algorand/go-algorand-sdk/client/v2/common/models"
+	"github.com/algorand/go-algorand-sdk/crypto"
+	"github.com/algorand/go-algorand-sdk/mnemonic"
+	"github.com/algorand/go-algorand-sdk/transaction"
+	"github.com/algorand/go-algorand-sdk/types"
+	"github.com/sirupsen/logrus"
+)
+
+const (
+	SingletonExpPKEY = "expiredpkey"
+)
+
+type EXPKEYWorker struct {
+	sync.RWMutex
+	Account     *crypto.Account
+	AuthAccount *crypto.Account
+	SenderAddr  string
+	SenderInfo  *models.Account
+	SParams     *types.SuggestedParams
+	WorkerCommon
+}
+
+func (w *EXPKEYWorker) getSenderInfo() *models.Account {
+	w.RLock()
+	defer w.RUnlock()
+	return w.SenderInfo
+}
+
+func (w *EXPKEYWorker) getSuggestedParams() *types.SuggestedParams {
+	w.RLock()
+	defer w.RUnlock()
+	return w.SParams
+}
+
+func (w *EXPKEYWorker) updateSuggestedParams(ctx context.Context) {
+	txParams, err := w.apis.Aapi.Client.SuggestedParams().Do(ctx)
+	if err != nil {
+		w.log.WithError(err).Error("Error getting suggested tx params")
+		return
+	}
+	w.log.Infof("Suggested first round is %d", txParams.FirstRoundValid)
+	w.Lock()
+	w.SParams = &txParams
+	w.Unlock()
+}
+
+func (w *EXPKEYWorker) updateAccountInfo(ctx context.Context) {
+	aInfo, err := w.apis.Aapi.Client.AccountInformation(w.SenderAddr).Do(ctx)
+	if err != nil {
+		w.log.WithError(err).Error("Error getting account Info")
+		return
+	}
+	w.log.Infof("Account balance is %.3fA", float64(aInfo.Amount)/1000000.0)
+	w.Lock()
+	w.SenderInfo = &aInfo
+	w.Unlock()
+}
+
+func EXPKEYWorkerNew(ctx context.Context, apis *WorkerAPIs, log *logrus.Logger, cfg *config.BotConfig) Worker {
+	pkstr, ok := cfg.PKeys[cfg.ExPKey.PKey]
+	if !ok {
+		log.Fatal("Missing private key for ", cfg.ExPKey.PKey)
+	}
+
+	pk, err := mnemonic.ToPrivateKey(pkstr)
+	if err != nil {
+		log.Fatal("Error importing private key", err)
+		return nil
+	}
+
+	account, err := crypto.AccountFromPrivateKey(pk)
+	if err != nil {
+		log.Fatal("Error creating account object", err)
+		return nil
+	}
+	log.Infof("Expired key notifier account is %s", account.Address.String())
+
+	apkstr, ok := cfg.PKeys[cfg.ExPKey.AKey]
+	if !ok {
+		log.Fatal("Missing private key for ", cfg.ExPKey.AKey)
+	}
+
+	apk, err := mnemonic.ToPrivateKey(apkstr)
+	if err != nil {
+		log.Fatal("Error importing private key", err)
+		return nil
+	}
+
+	auth_account, err := crypto.AccountFromPrivateKey(apk)
+	if err != nil {
+		log.Fatal("Error creating account object", err)
+		return nil
+	}
+	log.Infof("Expired key notifier auth_account is %s", auth_account.Address.String())
+
+	return &EXPKEYWorker{
+		Account:     &account,
+		AuthAccount: &auth_account,
+		SenderAddr:  account.Address.String(),
+		WorkerCommon: WorkerCommon{
+			cfg:        cfg,
+			syncWorker: false,
+			apis:       apis,
+			log:        log.WithFields(logrus.Fields{"wrk": SingletonExpPKEY}),
+		},
+	}
+}
+
+func (w *EXPKEYWorker) Config(ctx context.Context) error {
+	if v, ok := w.cfg.WSnglt[SingletonExpPKEY]; !ok || !v {
+		w.log.Infof("%s disabled, skipping configuration", SingletonExpPKEY)
+		return nil
+	}
+
+	return nil
+}
+
+func (w *EXPKEYWorker) expire(ctx context.Context, addr string) {
+	w.log.Infof("Notifying account %s", addr)
+	txn, err := transaction.MakePaymentTxnWithFlatFee(
+		w.SenderAddr,
+		addr,
+		transaction.MinTxnFee,
+		1,
+		uint64(w.SParams.FirstRoundValid),
+		uint64(w.SParams.LastRoundValid),
+		nil,
+		"",
+		w.SParams.GenesisID,
+		w.SParams.GenesisHash)
+	if err != nil {
+		w.log.WithError(err).Error("Error creating transaction")
+		return
+	}
+
+	// Sign the transaction
+	_, signedTxn, err := crypto.SignTransaction(w.AuthAccount.PrivateKey, txn)
+	if err != nil {
+		w.log.WithError(err).Error("Error signing transaction")
+		return
+	}
+	sendResponse, err := w.apis.Aapi.Client.SendRawTransaction(signedTxn).Do(ctx)
+	if err != nil {
+		w.log.WithError(err).Error("Error sending transaction")
+		return
+	}
+	w.log.Infof("Submitted transaction %s\n", sendResponse)
+}
+
+func (w *EXPKEYWorker) notifier(ctx context.Context) {
+	//Loop until Algoverse gets cancelled
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		w.updateAccountInfo(ctx)
+		w.updateSuggestedParams(ctx)
+		if w.SParams.FirstRoundValid > 0 && w.SenderInfo.Amount > 1000000 {
+			if accounts, err := w.apis.Gapi.ExpiredOnlineAccounts(ctx, uint64(w.SParams.FirstRoundValid)); err == nil {
+				w.log.Infof("Got %d online expired accounts", len(accounts.Accounts.Nodes))
+				for _, v := range accounts.Accounts.Nodes {
+					if v.IsOnline {
+						w.expire(ctx, v.Addr)
+						time.Sleep(time.Millisecond * 100)
+					}
+				}
+			}
+		} else {
+			w.log.Error("Bad weather")
+		}
+
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Second * time.Duration(w.cfg.ExPKey.Sleep)):
+		}
+	}
+}
+
+func (w *EXPKEYWorker) Spawn(ctx context.Context) error {
+	if v, ok := w.cfg.WSnglt[SingletonExpPKEY]; !ok || !v {
+		w.log.Infof("%s disabled, not spawning", SingletonExpPKEY)
+		return nil
+	}
+	go w.notifier(ctx)
+	return nil
+}

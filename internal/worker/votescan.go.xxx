@@ -1,0 +1,226 @@
+package worker
+
+import (
+	"context"
+
+	"github.com/algonode/voibot/internal/config"
+	"github.com/algorand/go-algorand-sdk/client/v2/common/models"
+	"github.com/algorand/go-algorand-sdk/types"
+	"github.com/sirupsen/logrus"
+)
+
+const (
+	SingletonVOTESCAN = "votescan"
+)
+
+type BlockVotes struct {
+	round    uint64
+	proposer int
+	voters   []int
+}
+
+type Votes struct {
+	next int
+	amap map[types.Address]int
+}
+
+type EQUALIZERWorker struct {
+	votes     Votes
+	nextRound uint64
+	bvChan    chan *BlockVotes
+	WorkerCommon
+}
+
+func (w *EQUALIZERWorker) getAddrId(ctx context.Context, addr types.Address) int {
+	if id, ok := w.votes.amap[addr]; ok {
+		return id
+	}
+	w.votes.next++
+	id := w.votes.next
+	w.votes.amap[addr] = id
+	w.log.Infof("New address mapping %s = %d", addr.String(), id)
+	if _, err := w.apis.Dapi.Client.Exec(ctx, "INSERT INTO x_voters_agg (addr,id) VALUES ($1,$2)", []byte(addr[:]), id); err != nil {
+		w.log.WithError(err).Panic("Fatal error updating address map")
+	}
+	return id
+}
+
+func (w *EQUALIZERWorker) loadVoteScanRound(ctx context.Context) error {
+	query := `select COALESCE(max(round),0) round from x_votes`
+
+	rows, err := w.apis.Dapi.Client.Query(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	w.nextRound = 0
+
+	for rows.Next() {
+		if err := rows.Scan(&w.nextRound); err != nil {
+			return err
+		}
+		w.nextRound++
+	}
+	return nil
+}
+
+func (w *EQUALIZERWorker) loadVotersMap(ctx context.Context) error {
+	query := `select addr, id from x_voters_agg`
+
+	rows, err := w.apis.Dapi.Client.Query(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var addr []byte
+	var id int
+
+	for rows.Next() {
+		if err := rows.Scan(&addr, &id); err != nil {
+			return err
+		}
+		var address types.Address
+		copy(address[:], addr)
+		w.log.Infof("Loaded voter %s id %d", address.String(), id)
+		w.votes.amap[address] = id
+		if id > w.votes.next {
+			w.votes.next = id
+		}
+	}
+	return nil
+}
+
+func EQUALIZERWorkerNew(ctx context.Context, apis *WorkerAPIs, log *logrus.Logger, cfg *config.BotConfig) Worker {
+
+	return &EQUALIZERWorker{
+		votes: Votes{
+			next: 0,
+			amap: make(map[types.Address]int),
+		},
+		WorkerCommon: WorkerCommon{
+			cfg:        cfg,
+			syncWorker: false,
+			apis:       apis,
+			log:        log.WithFields(logrus.Fields{"wrk": SingletonVOTESCAN}),
+		},
+	}
+}
+
+func (w *EQUALIZERWorker) Config(ctx context.Context) error {
+	if v, ok := w.cfg.WSnglt[SingletonVOTESCAN]; !ok || !v {
+		w.log.Infof("%s disabled, skipping configuration", SingletonVOTESCAN)
+		return nil
+	}
+
+	err := w.loadVoteScanRound(ctx)
+	if err != nil {
+		w.log.WithError(err).Panic("Error getting last vote scan round")
+		return nil
+	}
+	w.log.Infof("VoteScan resumes from %d", w.nextRound)
+
+	err = w.loadVotersMap(ctx)
+	if err != nil {
+		w.log.WithError(err).Panic("Error loading voters map")
+		return nil
+	}
+
+	w.bvChan = make(chan *BlockVotes, 1000)
+
+	return nil
+}
+
+func (w *EQUALIZERWorker) parseBlock(ctx context.Context, round uint64, block *models.BlockResponse) {
+	prop := ((*block.Cert)["prop"]).(map[interface{}]interface{})
+	votes := ((*block.Cert)["vote"]).([]interface{})
+	proposer := prop["oprop"].([]uint8)
+
+	var address types.Address
+	copy(address[:], proposer)
+	propId := w.getAddrId(ctx, address)
+	voteIds := make([]int, 0, 100)
+	for _, vote := range votes {
+		copy(address[:], vote.(map[interface{}]interface{})["snd"].([]uint8))
+		voterId := w.getAddrId(ctx, address)
+		voteIds = append(voteIds, voterId)
+	}
+	if round%1000 == 0 {
+		w.log.Infof("vt;%d;%d;%v", round, propId, voteIds)
+	}
+	w.bvChan <- &BlockVotes{
+		round:    round,
+		proposer: propId,
+		voters:   voteIds,
+	}
+}
+
+func (w *EQUALIZERWorker) voteScanner(ctx context.Context) {
+	//Loop until Algoverse gets cancelled
+	var lastRound uint64 = 0
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		if w.nextRound > lastRound {
+			s, err := w.apis.Aapi.WaitForRoundAfter(ctx, w.nextRound)
+			if err != nil {
+				w.log.WithError(err).Error("Error waiting for the next round")
+				continue
+			}
+			w.log.Infof("Round %d, last is %d", w.nextRound, s.LastRound)
+			lastRound = s.LastRound
+		}
+		block, err := w.apis.Aapi.GetBlockRaw(ctx, w.nextRound)
+		if err != nil {
+			w.log.WithError(err).Errorf("Error getting block for round %d", w.nextRound)
+			continue
+		}
+		w.parseBlock(ctx, w.nextRound, block)
+		w.nextRound++
+	}
+}
+
+func (w *EQUALIZERWorker) saveVotes(ctx context.Context, bv *BlockVotes) {
+	query := `INSERT INTO x_votes (round,proposer,voters) VALUES ($1,$2,$3)`
+	if _, err := w.apis.Dapi.Client.Exec(ctx, query, bv.round, bv.proposer, bv.voters); err != nil {
+		w.log.WithError(err).Panic("Fatal error inserting votes")
+	}
+	if bv.round%uint64(w.cfg.VoteS.Agcnt) == 0 {
+		query = `call x_sp_vote_agg()`
+		if _, err := w.apis.Dapi.Client.Exec(ctx, query); err != nil {
+			w.log.WithError(err).Panic("Fatal error aggregating votes")
+		}
+		w.log.Infof("Aggregated votes up to round %d", bv.round)
+	}
+}
+
+func (w *EQUALIZERWorker) voteSaver(ctx context.Context) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			close(w.bvChan)
+			return
+		case bv, ok := <-w.bvChan:
+			if !ok {
+				close(w.bvChan)
+				return
+			}
+			w.saveVotes(ctx, bv)
+		}
+	}
+}
+
+func (w *EQUALIZERWorker) Spawn(ctx context.Context) error {
+	if v, ok := w.cfg.WSnglt[SingletonVOTESCAN]; !ok || !v {
+		w.log.Infof("%s disabled, not spawning", SingletonVOTESCAN)
+		return nil
+	}
+	go w.voteSaver(ctx)
+	go w.voteScanner(ctx)
+	return nil
+}
