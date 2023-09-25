@@ -9,12 +9,14 @@ require (
 	github.com/jackc/pgx/v5 v5.3.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/tidwall/jsonc v0.3.2
+	go.uber.org/ratelimit v0.3.0
 )
 
 require github.com/google/go-cmp v0.5.8 // indirect
 
 require (
 	github.com/algorand/avm-abi v0.2.0 // indirect
+	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect

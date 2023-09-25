@@ -78,6 +78,7 @@ func main() {
 
 	workers := []worker.Worker{
 		worker.EQUALIZERWorkerNew(ctx, apis, slog, &cfg),
+		worker.SPAMWorkerNew(ctx, apis, slog, &cfg),
 	}
 
 	for _, w := range workers {

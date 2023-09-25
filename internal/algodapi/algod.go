@@ -18,6 +18,9 @@ package algodapi
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
+	"time"
 
 	"github.com/algonode/voibot/internal/config"
 	"github.com/algorand/go-algorand-sdk/v2/client/v2/algod"
@@ -33,7 +36,20 @@ type AlgodAPI struct {
 func Make(ctx context.Context, acfg *config.NodeConfig, log *logrus.Logger) (*AlgodAPI, error) {
 
 	// Create an algod client
-	algodClient, err := algod.MakeClient(acfg.Address, acfg.Token)
+	transport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 15 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableKeepAlives:     false,
+		MaxIdleConnsPerHost:   100,
+		MaxIdleConns:          100,
+	}
+
+	algodClient, err := algod.MakeClientWithTransport(acfg.Address, acfg.Token, nil, transport)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make algod client: %s\n", err)
 	}

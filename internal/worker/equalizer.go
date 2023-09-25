@@ -30,7 +30,7 @@ type BallastAccounts struct {
 }
 
 type SParams struct {
-	sync.Mutex
+	sync.RWMutex
 	params *types.SuggestedParams
 }
 
@@ -38,6 +38,7 @@ type EQUALIZERWorker struct {
 	lastRound      atomic.Uint64
 	ballastAccount crypto.Account
 	ballast        uint64
+	bAccounts      int
 	myAccounts     BallastAccounts
 	rsChan         chan *RoundStatus
 	sParams        SParams
@@ -146,6 +147,7 @@ func (w *EQUALIZERWorker) update(bi *avapi.BallastInfo) {
 		}
 	}
 	w.myAccounts.myTotal = total
+	w.bAccounts = len(bi.Bparts)
 	if v, ok := bi.Bots[w.ballastAccount.Address.String()]; ok {
 		w.ballast = v
 	} else {
@@ -160,6 +162,9 @@ func (w *EQUALIZERWorker) calculateBalastUpdate(bi *avapi.BallastInfo) (target u
 	deployed := w.myAccounts.myTotal
 	if target > deployed {
 		increase = target - deployed
+		if increase < 1_000_000 {
+			increase = 0
+		}
 		return
 	}
 	decrease = deployed - target
@@ -260,7 +265,8 @@ func (w *EQUALIZERWorker) ensureBallast(ctx context.Context, tVoiPerAccount uint
 func (w *EQUALIZERWorker) addBallast(ctx context.Context, increase uint64) {
 	inc := uint64(float64(increase) * w.cfg.EQCFG.Upfactor)
 	//	w.log.Infof("INC: %d .. %d", increase, inc)
-	tVoiPerAccount := (w.myAccounts.myTotal + inc) / uint64(len(w.myAccounts.bmap))
+	//	tVoiPerAccount := (w.myAccounts.myTotal + inc) / uint64(len(w.myAccounts.bmap))
+	tVoiPerAccount := (w.myAccounts.myTotal + inc) / uint64(w.bAccounts)
 	w.ensureBallast(ctx, tVoiPerAccount)
 }
 

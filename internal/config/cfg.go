@@ -41,6 +41,10 @@ type EQConfig struct {
 	Downfactor float64 `json:"downfactor"`
 }
 
+type SPAMConfig struct {
+	Threads int `json:"threads"`
+}
+
 type KV map[string]string
 type KB map[string]bool
 
@@ -48,6 +52,7 @@ type BotConfig struct {
 	Algod  *NodeConfig  `json:"algod-api"`
 	AVAPI  *AVAPIConfig `json:"av-api"`
 	EQCFG  *EQConfig    `json:"equalizer"`
+	SPAM   *SPAMConfig  `json:"spam"`
 	PKeys  KV           `json:"pkeys"`
 	WSnglt KB           `json:"singletons"`
 }
