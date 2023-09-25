@@ -38,6 +38,7 @@ type EQUALIZERWorker struct {
 	lastRound      atomic.Uint64
 	ballastAccount crypto.Account
 	ballast        uint64
+	totalBallast   uint64
 	bAccounts      int
 	myAccounts     BallastAccounts
 	rsChan         chan *RoundStatus
@@ -146,6 +147,7 @@ func (w *EQUALIZERWorker) update(bi *avapi.BallastInfo) {
 			w.log.Warnf("No update for ballast account %s", addr)
 		}
 	}
+	w.totalBallast = bi.Ballast
 	w.myAccounts.myTotal = total
 	w.bAccounts = len(bi.Bparts)
 	if v, ok := bi.Bots[w.ballastAccount.Address.String()]; ok {
@@ -159,7 +161,8 @@ func (w *EQUALIZERWorker) calculateBalastUpdate(bi *avapi.BallastInfo) (target u
 	target = (bi.Buffer + bi.Online) * uint64(w.cfg.EQCFG.Target) / (100 - uint64(w.cfg.EQCFG.Target))
 	increase = 0
 	decrease = 0
-	deployed := w.myAccounts.myTotal
+	//	deployed := w.myAccounts.myTotal
+	deployed := w.totalBallast
 	if target > deployed {
 		increase = target - deployed
 		if increase < 1_000_000 {
@@ -264,16 +267,16 @@ func (w *EQUALIZERWorker) ensureBallast(ctx context.Context, tVoiPerAccount uint
 
 func (w *EQUALIZERWorker) addBallast(ctx context.Context, increase uint64) {
 	inc := uint64(float64(increase) * w.cfg.EQCFG.Upfactor)
-	//	w.log.Infof("INC: %d .. %d", increase, inc)
 	//	tVoiPerAccount := (w.myAccounts.myTotal + inc) / uint64(len(w.myAccounts.bmap))
-	tVoiPerAccount := (w.myAccounts.myTotal + inc) / uint64(w.bAccounts)
+	tVoiPerAccount := (w.totalBallast + inc) / uint64(w.bAccounts)
+	//	w.log.Infof("INC: %d .. %d :: %d", increase/1_000_000, inc/1_000_000, tVoiPerAccount/1_000_000)
 	w.ensureBallast(ctx, tVoiPerAccount)
 }
 
 func (w *EQUALIZERWorker) removeBallast(ctx context.Context, decrease uint64) {
 	dec := uint64(float64(decrease) * w.cfg.EQCFG.Downfactor)
-	//	w.log.Infof("DEC: %d .. %d", decrease, dec)
-	tVoiPerAccount := (w.myAccounts.myTotal - dec) / uint64(len(w.myAccounts.bmap))
+	tVoiPerAccount := (w.totalBallast - dec) / uint64(w.bAccounts)
+	//	w.log.Infof("DEC: %d .. %d :: %d ", decrease/1_000_000, dec/1_000_000, tVoiPerAccount/1_000_000)
 	w.ensureBallast(ctx, tVoiPerAccount)
 }
 
@@ -289,7 +292,7 @@ func (w *EQUALIZERWorker) equalize(ctx context.Context, rs uint64) {
 
 		target, inc, dec := w.calculateBalastUpdate(bi)
 		if inc+dec > 0 {
-			w.log.Infof("Target:%d, increase:%d, decrease:%d", target/1_000_000, inc/1_000_000, dec/1_000_000)
+			w.log.Infof("Ballast:%d Target:%d, increase:%d, decrease:%d", w.totalBallast/1_000_000, target/1_000_000, inc/1_000_000, dec/1_000_000)
 			if inc > 0 {
 				w.addBallast(ctx, inc)
 			}
@@ -297,7 +300,7 @@ func (w *EQUALIZERWorker) equalize(ctx context.Context, rs uint64) {
 				w.removeBallast(ctx, dec)
 			}
 		} else {
-			w.log.Infof("No ballast update for round %d", bi.Round)
+			w.log.Infof("No ballast update for round %d target @ %d", bi.Round, target/1_000_000)
 		}
 	}
 }
