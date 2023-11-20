@@ -69,7 +69,7 @@ func (w *SPAMWorker) Config(ctx context.Context) error {
 		return nil
 	}
 
-	w.log.Infof("Spammer %s booted with %d thread", w.spamAccount.Address.String()[0:8], w.cfg.SPAM.Threads)
+	w.log.Infof("Spammer %s booted with %d thread and rate %d", w.spamAccount.Address.String()[0:8], w.cfg.SPAM.Threads, w.cfg.SPAM.Rate)
 
 	w.txChan = make(chan Stx, 500)
 
@@ -96,11 +96,13 @@ func (w *SPAMWorker) execSync(ctx context.Context, stx Stx) {
 		w.log.WithError(err).Error("Error sending transaction")
 		return
 	}
-	w.log.Infof("Submitted transaction %s\n", sendResponse)
+	if sendResponse[0] == 'A' {
+		w.log.Infof("Submitted transaction %s\n", sendResponse)
+	}
 }
 
 func (w *SPAMWorker) spamGen(ctx context.Context) {
-	rl := ratelimit.New(500) // per second
+	rl := ratelimit.New(w.cfg.SPAM.Rate) // per second
 	for {
 		if ctx.Err() != nil {
 			return

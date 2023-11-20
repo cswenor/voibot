@@ -43,6 +43,7 @@ type EQConfig struct {
 
 type SPAMConfig struct {
 	Threads int `json:"threads"`
+	Rate    int `json:"rate"`
 }
 
 type KV map[string]string
