@@ -1,16 +1,28 @@
 {
   "algod-api": {
-    "address": "http://192.168.1.210:18180",
-    "token": ".."
+    "address": "http://192.168.1.210:8181",
+    "token": "..."
   },
-  "gql-api": {
-    "address": "https://mainnet.all.algorpc.pro/.../gql/v0"
+  "av-api": {
+    "address": "https://analytics.testnet.voi.nodly.io",
+    "token": ""
   },
   "pkeys": {
-    //..
-    "expiredpkey": "..."
+    "EQBOT": "25 words",
+    "SPAM": "not used",
+  },
+  "equalizer": {
+    "interval": 10,
+    "target": 50,
+    "upfactor": 1.0,
+    "downfactor": 0.2,
+  },
+  "spam": {
+    "threads": 10,  
+    "rate": 1500
   },
   "singletons": {
-    "": true
+    "equalizer": true,
+    "spam": false
   }
-} 
+}
