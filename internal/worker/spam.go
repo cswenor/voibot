@@ -83,7 +83,7 @@ func (w *SPAMWorker) updateSuggestedParams(ctx context.Context) {
 		return
 	}
 	w.log.Infof("Suggested first round is %d, minfee: %d", txParams.FirstRoundValid, txParams.MinFee)
-	txParams.Fee = 2_000
+	txParams.Fee = 1_000
 	txParams.FlatFee = true
 	w.sParams.Lock()
 	w.sParams.params = &txParams
@@ -102,7 +102,7 @@ func (w *SPAMWorker) execSync(ctx context.Context, stx Stx) {
 }
 
 func (w *SPAMWorker) spamGen(ctx context.Context) {
-	rl := ratelimit.New(w.cfg.SPAM.Rate) // per second
+	rl := ratelimit.New(w.cfg.SPAM.Rate, ratelimit.WithoutSlack) // per second
 	for {
 		if ctx.Err() != nil {
 			return
@@ -128,6 +128,7 @@ func (w *SPAMWorker) spamGen(ctx context.Context) {
 		// w.txChan <- serializedStxs
 
 		rl.Take()
+
 		if stx, err := w.makeSTX(ctx); err == nil {
 			w.txChan <- stx
 		}
