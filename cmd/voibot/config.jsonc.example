@@ -10,6 +10,7 @@
   "pkeys": {
     "EQBOT": "25 words",
     "SPAM": "not used",
+    "MINE": "25 words"
   },
   "equalizer": {
     "interval": 10,
@@ -21,8 +22,13 @@
     "threads": 10,  
     "rate": 1500
   },
+  "mine": {
+    "threads": 10,  
+    "rate": 1500
+  },
   "singletons": {
-    "equalizer": true,
-    "spam": false
+    "equalizer": false,
+    "spam": false,
+    "mine": true
   }
 }
