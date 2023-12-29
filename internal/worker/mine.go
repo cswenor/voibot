@@ -22,7 +22,8 @@ type Stx []byte
 type MINEWorker struct {
 	mineAccount crypto.Account
 	txChan      chan Stx
-	priceChan	chan float64 
+	price		float64 
+	rank		uint 
 	sParams     SParams
 	WorkerCommon
 }
@@ -237,6 +238,7 @@ func (w *MINEWorker) Spawn(ctx context.Context) error {
 	//Submit threads
 	go w.paramsUpdater(ctx)
 	go w.pricePollExec(ctx) // Polls for price to be used to determine whether or not to generate transactions to be submitted - Single Thread
+	go w.rankPollExec(ctx) // Polls for rank to be used to determine whether or not to generate transactions to be submitted - Single Thread
 	for i := 0; i < w.cfg.MINE.Threads; i++ {
 		go w.mineExec(ctx) // Executing threads submitting transactions
 	}
@@ -252,7 +254,6 @@ func (w *MINEWorker) pricePollExec(ctx context.Context) {
 		}
 		select {
 		case <-ctx.Done():
-			close(w.priceChan)
 			return
 		default:
 			w.execPoll(ctx, stx)
@@ -262,5 +263,25 @@ func (w *MINEWorker) pricePollExec(ctx context.Context) {
 
 
 func (w *MINEWorker) execPoll(ctx context.Context, stx Stx) {//Poll and get back price to be submitted to channel for mineing threads to read
-	w.priceChan <- price
+	w.price <- price
 }
+
+//Rank polling thread - Needs to poll the price of the ORA token and share the price with the minimg threads via a channel
+func (w *MINEWorker) rankPollExec(ctx context.Context) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			w.execRank(ctx, stx)
+		}
+	}
+}
+
+func (w *MINEWorker) execRank(ctx context.Context, stx Stx) {//Poll and get back price to be submitted to channel for mineing threads to read
+	w.rank <- rank
+}
+
