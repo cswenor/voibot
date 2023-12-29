@@ -22,10 +22,20 @@ type Stx []byte
 type MINEWorker struct {
 	mineAccount crypto.Account
 	txChan      chan Stx
-	price		float64 
-	rank		uint 
+	price		PriceContainer 
+	rank		RankContainer 
 	sParams     SParams
 	WorkerCommon
+}
+
+type PriceContainer struct {
+	price		float64 
+	mu			sync.Mutex
+}
+
+type RankContainer struct {
+	rank		uint
+	mu			sync.Mutex
 }
 
 func MINEWorkerNew(ctx context.Context, apis *WorkerAPIs, log *logrus.Logger, cfg *config.BotConfig) Worker {
