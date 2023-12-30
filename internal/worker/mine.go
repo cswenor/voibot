@@ -263,6 +263,7 @@ func (w *MINEWorker) mineGen(ctx context.Context) {
 
 		appData, err := w.getApplicationData(ctx)
 		//TODO: Determine how many transactions to send to make rank number 1 if previous criteria met - right now just sending 1 per group
+		// Alternatively don't create transactions in a group and submit each one individually until rank 0 is achieved
 		if stx, err := w.createGroup(ctx, appData, 0, 1); err == nil {
 			w.txChan <- stx
 		}
