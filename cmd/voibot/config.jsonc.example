@@ -24,7 +24,10 @@
   },
   "mine": {
     "threads": 10,  
-    "rate": 1500
+    "rate": 1500,
+    "depositAddress": "xx",
+    "abi": "abi.json",
+    "appId": "xx"
   },
   "singletons": {
     "equalizer": false,
