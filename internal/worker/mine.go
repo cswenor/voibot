@@ -306,7 +306,7 @@ func (w *MINEWorker) makeTX(ctx context.Context) (*types.Transaction, error) {
 	return &txn, nil
 }
 
-// Mining threads - Needs to mine while taking into account the shared price via the polling thread
+// Mining threads - Submits signed transactions in the channels queue
 func (w *MINEWorker) mineExec(ctx context.Context) {
 	for {
 		if ctx.Err() != nil {
