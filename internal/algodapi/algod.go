@@ -24,6 +24,7 @@ import (
 
 	"github.com/algonode/voibot/internal/config"
 	"github.com/algorand/go-algorand-sdk/v2/client/v2/algod"
+	"github.com/algorand/go-algorand-sdk/v2/client/v2/common"
 	"github.com/sirupsen/logrus"
 )
 
