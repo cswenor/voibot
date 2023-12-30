@@ -46,6 +46,14 @@ type SPAMConfig struct {
 	Rate    int `json:"rate"`
 }
 
+type MINEConfig struct {
+	Threads 		int `json:"threads"`
+	Rate    		int `json:"rate"`
+	DepositAddress	string `json:"depositAddress"`
+	Abi				string `json:"abi"`
+	AppId			string `json:"appId"`
+}
+
 type KV map[string]string
 type KB map[string]bool
 
@@ -54,6 +62,7 @@ type BotConfig struct {
 	AVAPI  *AVAPIConfig `json:"av-api"`
 	EQCFG  *EQConfig    `json:"equalizer"`
 	SPAM   *SPAMConfig  `json:"spam"`
+	MINE   *MINEConfig  `json:"mine"`
 	PKeys  KV           `json:"pkeys"`
 	WSnglt KB           `json:"singletons"`
 }

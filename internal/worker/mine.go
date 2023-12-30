@@ -20,22 +20,26 @@ const (
 type Stx []byte
 
 type MINEWorker struct {
-	mineAccount crypto.Account
-	txChan      chan Stx
-	price		PriceContainer 
-	rank		RankContainer 
-	sParams     SParams
+	mineAccount 	crypto.Account
+	txChan      	chan Stx
+	price			FloatValueContainer 
+	rank			IntValueContainer 
+	sParams     	SParams
+	depositAddress 	types.Address
+	contract 		abi.Contract
+	method 			abi.Method
+	appID			uint64
 	WorkerCommon
 }
 
-type PriceContainer struct {
-	price		float64 
-	mu			sync.Mutex
+type FloatValueContainer struct {
+	value		float64 
+	mu			sync.RWMutex
 }
 
-type RankContainer struct {
-	rank		uint
-	mu			sync.Mutex
+type IntValueContainer struct {
+	value		uint
+	mu			sync.RWMutex
 }
 
 func MINEWorkerNew(ctx context.Context, apis *WorkerAPIs, log *logrus.Logger, cfg *config.BotConfig) Worker {
@@ -65,8 +69,47 @@ func (w *MINEWorker) setupMiner(ctx context.Context) error {
 	}
 
 	//Implement any other setup and config that the Miner worker needs so that the threads can utilize them
+	da, ok := w.cfg.MINE.DepositAddress
+	if !ok {
+		return fmt.Errorf("MINE Deposit Address not found in conifg")
+	}
+
+	w.depositAddress, err = types.DecodeAddress(da)
+	if err != nil {
+		return fmt.Errorf("MINE failed to decode deposit address")
+	}
+
+	abiPath, ok := w.cfg.MINE.Abi
+	if !ok {
+		return fmt.Errorf("MINE ABI not found in conifg")
+	}
+
+	b, err := os.ReadFile(abiPath)
+	if err != nil {
+		return fmt.Errorf("failed to read abi.json file", "err", err)
+	}
+
+	err = json.Unmarshal(b, &w.contract)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal abi.json to abi contract", "err", err)
+	}
+
+	id, ok := w.cfg.MINE.AppId
+	if !ok {
+		return fmt.Errorf("MINE AppId not found in conifg")
+	}
+
+	w.appID, err = strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return fmt.Errorf("failed to parse app id to uint64", "err", err, "appID", id)
+	}
 	
 
+	w.method, err = w.contract.GetMethodByName("mine")
+	if err != nil {
+		return fmt.Errorf("failed to get method from contract", "methodName", "mine")
+	}
+	
 	return nil
 
 }
@@ -143,7 +186,18 @@ func (w *MINEWorker) mineGen(ctx context.Context) {
 
 		rl.Take()
 
-		//TODO - Only generate transaction to be submitted to the executing threads if price is not above limit
+		//TODO - Only generate transaction to be submitted to the executing threads if price is not above limit or our rank is number 1
+		// The price limit is defined as the cost of the number of transactions (already submitted and not) required to be submitted being greater than that currentPrice of the asset.
+		w.price.mu.Lock()
+		currentPrice := w.price.value
+		w.price.mu.Unlock()
+
+		w.rank.mu.Lock()
+		currentRank := w.rank.value
+		w.rank.mu.Unlock()
+
+
+
 		if stx, err := w.makeSTX(ctx); err == nil {
 			w.txChan <- stx
 		}
