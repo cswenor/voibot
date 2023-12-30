@@ -262,8 +262,7 @@ func (w *MINEWorker) mineGen(ctx context.Context) {
 		w.rank.mu.Unlock()
 
 		appData, err := w.getApplicationData(ctx)
-
-		//TODO: Determine how many transactions to send to make rank number 1 if previous criteria met
+		//TODO: Determine how many transactions to send to make rank number 1 if previous criteria met - right now just sending 1 per group
 		if stx, err := w.createGroup(ctx, appData, 0, 1); err == nil {
 			w.txChan <- stx
 		}
